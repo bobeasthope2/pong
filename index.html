@@ -67,7 +67,7 @@
 </head>
 <body>
     <h1>NEON PONG: ONLINE</h1>
-    
+
     <div id="menu">
         <div id="start-screen">
             <button onclick="createGame()">Create Game (Host)</button>
@@ -99,7 +99,7 @@
         let player1 = { x: 20, y: 200, color: "#0ff", score: 0 };
         let player2 = { x: 768, y: 200, color: "#f0f", score: 0 };
         let ball = { x: 400, y: 250, radius: 8, dx: 6, dy: 6, speed: 6 };
-        
+
         let upPressed = false;
         let downPressed = false;
         let myPaddleSpeed = 7;
@@ -118,9 +118,9 @@
         function createGame() {
             startScreen.classList.add("hidden");
             statusText.innerText = "Generating Game ID...";
-            
+
             peer = new Peer(); // Generates a random ID
-            
+
             peer.on('open', (id) => {
                 isHost = true;
                 statusText.innerHTML = `Send this Game ID to your friend:<br><br><span class="copy-text">${id}</span><br><br>Waiting for them to connect...`;
@@ -144,7 +144,7 @@
                 isHost = false;
                 connection = peer.connect(joinId);
                 connection.on('open', setupConnection);
-                
+
                 connection.on('error', (err) => {
                     statusText.innerText = "Connection failed. Check ID.";
                 });
@@ -154,7 +154,7 @@
         function setupConnection() {
             menu.classList.add("hidden");
             canvas.style.display = "block";
-            
+
             // Listen for data from the other player
             connection.on('data', (data) => {
                 if (isHost) {
@@ -201,15 +201,74 @@
                 let p = (ball.x < canvas.width / 2) ? player1 : player2;
                 if (ball.x - ball.radius < p.x + paddleW && ball.x + ball.radius > p.x &&
                     ball.y + ball.radius > p.y && ball.y - ball.radius < p.y + paddleH) {
-                    
+
                     let collidePoint = (ball.y - (p.y + paddleH / 2)) / (paddleH / 2);
                     let angleRad = (Math.PI / 4) * collidePoint;
                     let dir = (ball.x < canvas.width / 2) ? 1 : -1;
-                    
+
                     ball.dx = dir * ball.speed * Math.cos(angleRad);
                     ball.dy = ball.speed * Math.sin(angleRad);
                     ball.speed += 0.2; // increase speed slightly
                 }
 
                 // Scoring
-                if (ball.
+                if (ball.x < 0) { player2.score++; resetBall(); }
+                if (ball.x > canvas.width) { player1.score++; resetBall(); }
+
+                // Send state to client (Player 2)
+                connection.send({
+                    p1y: player1.y,
+                    bx: ball.x, by: ball.y,
+                    s1: player1.score, s2: player2.score
+                });
+            } else {
+                // Client sends its paddle position to Host
+                connection.send({ p2y: player2.y });
+            }
+        }
+
+        function draw() {
+            // Clear background
+            ctx.fillStyle = "#111";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Net
+            ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+            for (let i = 0; i <= canvas.height; i += 30) ctx.fillRect(canvas.width / 2 - 2, i, 4, 15);
+
+            // Draw Player 1
+            ctx.fillStyle = player1.color;
+            ctx.shadowBlur = 15; ctx.shadowColor = player1.color;
+            ctx.fillRect(player1.x, player1.y, paddleW, paddleH);
+
+            // Draw Player 2
+            ctx.fillStyle = player2.color;
+            ctx.shadowColor = player2.color;
+            ctx.fillRect(player2.x, player2.y, paddleW, paddleH);
+
+            // Draw Ball
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.shadowColor = "#fff";
+            ctx.fill();
+            ctx.closePath();
+
+            ctx.shadowBlur = 0; // Reset for text
+
+            // Draw Scores
+            ctx.font = "50px 'Courier New'";
+            ctx.fillStyle = player1.color;
+            ctx.fillText(player1.score, canvas.width / 4, 70);
+            ctx.fillStyle = player2.color;
+            ctx.fillText(player2.score, 3 * canvas.width / 4, 70);
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
