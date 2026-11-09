@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pong - Remote Multiplayer</title>
+    <!-- Load PeerJS for Peer-to-Peer networking -->
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        canvas {
+            background-color: #000;
+            border: 2px solid #0ff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+            display: none; /* Hidden until connected */
+        }
+        h1 {
+            color: #0ff;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+            margin-bottom: 20px;
+        }
+        #menu {
+            background: #222;
+            padding: 30px;
+            border: 1px solid #0ff;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 0 15px rgba(0,255,255,0.2);
+        }
+        input {
+            padding: 10px;
+            font-size: 16px;
+            background: #000;
+            color: #0ff;
+            border: 1px solid #0ff;
+            outline: none;
+            margin-bottom: 15px;
+            width: 80%;
+            text-align: center;
+        }
+        button {
+            background: #0ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+            transition: 0.2s;
+        }
+        button:hover { background: #fff; }
+        .hidden { display: none !important; }
+        #status { margin-top: 15px; color: #aaa; }
+        .copy-text { color: #f0f; font-weight: bold; font-size: 1.2em; user-select: all; }
+    </style>
+</head>
+<body>
+    <h1>NEON PONG: ONLINE</h1>
+    
+    <div id="menu">
+        <div id="start-screen">
+            <button onclick="createGame()">Create Game (Host)</button>
+            <p>-- OR --</p>
+            <input type="text" id="join-id" placeholder="Enter Game ID from Friend">
+            <br>
+            <button onclick="joinGame()">Join Game</button>
+        </div>
+        <div id="status"></div>
+    </div>
+
+    <canvas id="pongCanvas" width="800" height="500"></canvas>
+
+    <script>
+        // --- UI Elements ---
+        const menu = document.getElementById("menu");
+        const startScreen = document.getElementById("start-screen");
+        const statusText = document.getElementById("status");
+        const canvas = document.getElementById("pongCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // --- Networking Variables ---
+        let peer = null;
+        let connection = null;
+        let isHost = false;
+
+        // --- Game Variables ---
+        const paddleW = 12, paddleH = 100;
+        let player1 = { x: 20, y: 200, color: "#0ff", score: 0 };
+        let player2 = { x: 768, y: 200, color: "#f0f", score: 0 };
+        let ball = { x: 400, y: 250, radius: 8, dx: 6, dy: 6, speed: 6 };
+        
+        let upPressed = false;
+        let downPressed = false;
+        let myPaddleSpeed = 7;
+
+        // --- Controls ---
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") upPressed = true;
+            if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") downPressed = true;
+        });
+        window.addEventListener("keyup", (e) => {
+            if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") upPressed = false;
+            if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") downPressed = false;
+        });
+
+        // --- Network Setup ---
+        function createGame() {
+            startScreen.classList.add("hidden");
+            statusText.innerText = "Generating Game ID...";
+            
+            peer = new Peer(); // Generates a random ID
+            
+            peer.on('open', (id) => {
+                isHost = true;
+                statusText.innerHTML = `Send this Game ID to your friend:<br><br><span class="copy-text">${id}</span><br><br>Waiting for them to connect...`;
+            });
+
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnection();
+            });
+        }
+
+        function joinGame() {
+            const joinId = document.getElementById("join-id").value.trim();
+            if (!joinId) return alert("Please enter a Game ID");
+
+            startScreen.classList.add("hidden");
+            statusText.innerText = "Connecting to Host...";
+
+            peer = new Peer();
+            peer.on('open', () => {
+                isHost = false;
+                connection = peer.connect(joinId);
+                connection.on('open', setupConnection);
+                
+                connection.on('error', (err) => {
+                    statusText.innerText = "Connection failed. Check ID.";
+                });
+            });
+        }
+
+        function setupConnection() {
+            menu.classList.add("hidden");
+            canvas.style.display = "block";
+            
+            // Listen for data from the other player
+            connection.on('data', (data) => {
+                if (isHost) {
+                    // Host receives Player 2's paddle position
+                    player2.y = data.p2y;
+                } else {
+                    // Client receives the entire game state from Host
+                    player1.y = data.p1y;
+                    ball.x = data.bx;
+                    ball.y = data.by;
+                    player1.score = data.s1;
+                    player2.score = data.s2;
+                }
+            });
+
+            // Start loop
+            gameLoop();
+        }
+
+        // --- Game Logic ---
+        function resetBall() {
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height / 2;
+            ball.speed = 6;
+            ball.dx = -ball.dx;
+            ball.dy = 6 * (Math.random() > 0.5 ? 1 : -1);
+        }
+
+        function update() {
+            // Local Paddle Movement
+            let myPaddle = isHost ? player1 : player2;
+            if (upPressed && myPaddle.y > 0) myPaddle.y -= myPaddleSpeed;
+            if (downPressed && myPaddle.y < canvas.height - paddleH) myPaddle.y += myPaddleSpeed;
+
+            // Only the Host calculates ball physics and scoring to prevent desync
+            if (isHost) {
+                ball.x += ball.dx;
+                ball.y += ball.dy;
+
+                // Wall collisions
+                if (ball.y + ball.radius > canvas.height || ball.y - ball.radius < 0) ball.dy *= -1;
+
+                // Paddle collisions
+                let p = (ball.x < canvas.width / 2) ? player1 : player2;
+                if (ball.x - ball.radius < p.x + paddleW && ball.x + ball.radius > p.x &&
+                    ball.y + ball.radius > p.y && ball.y - ball.radius < p.y + paddleH) {
+                    
+                    let collidePoint = (ball.y - (p.y + paddleH / 2)) / (paddleH / 2);
+                    let angleRad = (Math.PI / 4) * collidePoint;
+                    let dir = (ball.x < canvas.width / 2) ? 1 : -1;
+                    
+                    ball.dx = dir * ball.speed * Math.cos(angleRad);
+                    ball.dy = ball.speed * Math.sin(angleRad);
+                    ball.speed += 0.2; // increase speed slightly
+                }
+
+                // Scoring
+                if (ball.
